@@ -5,15 +5,11 @@ services:
       dockerfile: Dockerfile
     container_name: posture-detector
     image: posture-detector:latest
-    # Windows環境でのカメラアクセス
-    # WSL2を使用している場合、/dev/video0をマウント
-    # Windowsネイティブの場合は、カメラデバイスのパスを調整が必要
-    devices:
-      - /dev/video0:/dev/video0
     # ポート公開（WebUI用）
     ports:
       - "8000:8000"
-    # 特権モード（カメラアクセスに必要）
-    privileged: true
+    # 環境変数（CAMERA_DEVICEが指定されていない場合は自動検出）
+    environment:
+      - CAMERA_DEVICE=${CAMERA_DEVICE:-}
     # 永続化（コンテナ停止後も削除しない）
     restart: unless-stopped
