@@ -17,10 +17,8 @@ def main():
     
     # モジュールの初期化
     camera = CameraHandler(camera_index=0, width=640, height=480)
-    pose_detector = PoseDetector(
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5
-    )
+    # MoveNet Lightning（高速）または MoveNet Thunder（高精度）を選択
+    pose_detector = PoseDetector(model_name="movenet_lightning")
     posture_analyzer = PostureAnalyzer(threshold_angle=35.0)
     ui = UI(window_name="姿勢検出・猫背判定")
     

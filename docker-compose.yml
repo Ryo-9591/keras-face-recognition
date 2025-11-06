@@ -1,0 +1,24 @@
+services:
+  posture-detector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: posture-detector
+    image: posture-detector:latest
+    # Windows環境でのカメラアクセス
+    # WSL2を使用している場合、/dev/video0をマウント
+    # Windowsネイティブの場合は、カメラデバイスのパスを調整が必要
+    devices:
+      - /dev/video0:/dev/video0
+    # 環境変数
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+    # ネットワークモード（ホストネットワークを使用してカメラにアクセス）
+    network_mode: host
+    # 特権モード（カメラアクセスに必要）
+    privileged: true
+    # 永続化（コンテナ停止後も削除しない）
+    restart: unless-stopped
+    # 標準入出力をアタッチ（-dオプションでもログが見えるように）
+    stdin_open: true
+    tty: true

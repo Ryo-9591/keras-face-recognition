@@ -3,20 +3,19 @@
 骨格キーポイントから猫背を判定
 """
 import math
-import mediapipe as mp
 
 
 class PostureAnalyzer:
     """猫背判定クラス"""
     
-    # MediaPipe PoseのランドマークID
+    # MoveNetのランドマークID
     NOSE = 0
-    LEFT_SHOULDER = 11
-    RIGHT_SHOULDER = 12
-    LEFT_EAR = 7
-    RIGHT_EAR = 8
-    LEFT_HIP = 23
-    RIGHT_HIP = 24
+    LEFT_SHOULDER = 5
+    RIGHT_SHOULDER = 6
+    LEFT_EAR = 3
+    RIGHT_EAR = 4
+    LEFT_HIP = 11
+    RIGHT_HIP = 12
     
     def __init__(self, threshold_angle=35.0):
         """
@@ -26,7 +25,6 @@ class PostureAnalyzer:
             threshold_angle: 猫背と判定する角度の閾値（度）
         """
         self.threshold_angle = threshold_angle
-        self.mp_pose = mp.solutions.pose
     
     def calculate_angle(self, point1, point2, point3):
         """
@@ -96,7 +94,7 @@ class PostureAnalyzer:
             (right_hip, '右腰')
         ]
         
-        missing = [name for landmark, name in required_landmarks if not landmark or landmark.get('visibility', 0) < 0.5]
+        missing = [name for landmark, name in required_landmarks if not landmark or landmark.get('confidence', 0) < 0.3]
         if missing:
             return {
                 'is_slouched': False,
@@ -116,7 +114,7 @@ class PostureAnalyzer:
         )
         
         # 首の位置を推定（鼻と肩の中点を使用）
-        if nose and nose.get('visibility', 0) > 0.5:
+        if nose and nose.get('confidence', 0) > 0.3:
             neck_estimate = (
                 (nose['x'] + shoulder_mid[0]) / 2,
                 (nose['y'] + shoulder_mid[1]) / 2

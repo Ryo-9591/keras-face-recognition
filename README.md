@@ -4,7 +4,7 @@ PCのカメラ映像からリアルタイムで姿勢を検出し、猫背を判
 
 ## 機能
 
-- **リアルタイム姿勢検出**: MediaPipe Poseを使用して骨格キーポイントを検出
+- **リアルタイム姿勢検出**: TensorFlow/Keras（MoveNet）を使用して骨格キーポイントを検出
 - **猫背判定**: 首・肩・腰の角度から猫背を自動判定
 - **視覚的フィードバック**: 骨格ラインと判定結果を画面に表示
 - **Docker対応**: Dockerコンテナ内で動作
@@ -23,33 +23,39 @@ git clone <repository-url>
 cd keras-face-recognition
 ```
 
-### 2. Dockerイメージのビルド
+### 2. Docker Composeで起動（推奨）
+
+```bash
+docker compose up -d
+```
+
+バックグラウンドで起動します。ログを確認するには：
+
+```bash
+docker compose logs -f
+```
+
+停止するには：
+
+```bash
+docker compose down
+```
+
+### 3. Dockerイメージを直接ビルド・実行する場合
+
+#### イメージのビルド
 
 ```bash
 docker build -t posture-detector .
 ```
 
-### 3. アプリケーションの起動
-
-#### Windowsの場合
+#### アプリケーションの起動
 
 ```bash
-docker run --rm -it --device=/dev/video0 -v /tmp/.X11-unix:/tmp/.X11-unix -e DISPLAY=$DISPLAY posture-detector
+docker run --rm -it --device=/dev/video0 posture-detector
 ```
 
-#### Linuxの場合
-
-```bash
-docker run --rm -it --device=/dev/video0 -v /tmp/.X11-unix:/tmp/.X11-unix -e DISPLAY=$DISPLAY posture-detector
-```
-
-#### macOSの場合
-
-```bash
-docker run --rm -it --device=/dev/video0 -v /tmp/.X11-unix:/tmp/.X11-unix -e DISPLAY=host.docker.internal:0 posture-detector
-```
-
-**注意**: Windows/macOSでは、カメラデバイスのパスが異なる場合があります。適宜調整してください。
+**注意**: Windows環境では、WSL2を使用している場合に`/dev/video0`が利用可能です。Windowsネイティブの場合は、カメラデバイスのパスを調整が必要な場合があります。
 
 ### 4. ローカル実行（Dockerなし）
 
@@ -74,7 +80,8 @@ python src/main.py
 
 ## 技術仕様
 
-- **姿勢検出**: MediaPipe Pose
+- **姿勢検出**: TensorFlow/Keras（MoveNet Lightning）
+- **深層学習フレームワーク**: TensorFlow 2.15, Keras 2.15
 - **画像処理**: OpenCV
 - **プログラミング言語**: Python 3.10
 - **推論速度**: 15fps以上（環境により異なります）
@@ -133,5 +140,5 @@ python src/main.py
 
 - **猫背判定の閾値**: `src/posture_analyzer.py`の`threshold_angle`を変更
 - **カメラ解像度**: `src/camera_handler.py`の`width`と`height`を変更
-- **検出精度**: `src/pose_detector.py`の`min_detection_confidence`と`min_tracking_confidence`を調整
+- **モデル選択**: `src/pose_detector.py`の`model_name`パラメータで"movenet_lightning"（高速）または"movenet_thunder"（高精度）を選択
 
