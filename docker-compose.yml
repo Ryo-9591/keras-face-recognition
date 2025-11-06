@@ -5,11 +5,6 @@ services:
       dockerfile: Dockerfile
     container_name: posture-detector
     image: posture-detector:latest
-    # ポート公開（WebUI用）
     ports:
       - "8000:8000"
-    # 環境変数（CAMERA_DEVICEが指定されていない場合は自動検出）
-    environment:
-      - CAMERA_DEVICE=${CAMERA_DEVICE:-}
-    # 永続化（コンテナ停止後も削除しない）
     restart: unless-stopped

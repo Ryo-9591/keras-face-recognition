@@ -15,28 +15,8 @@ from src.posture_analyzer import PostureAnalyzer
 app = FastAPI(title="姿勢検出・猫背判定アプリ")
 
 # グローバル変数
-pose_detector = None
-posture_analyzer = None
-
-
-def init_modules():
-    """モジュールの初期化"""
-    global pose_detector, posture_analyzer
-
-    pose_detector = PoseDetector(model_name="movenet_lightning")
-    posture_analyzer = PostureAnalyzer(threshold_angle=35.0)
-
-
-@app.on_event("startup")
-async def startup_event():
-    """アプリケーション起動時の処理"""
-    init_modules()
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """アプリケーション終了時の処理"""
-    pass
+pose_detector = PoseDetector(model_name="movenet_lightning")
+posture_analyzer = PostureAnalyzer(threshold_angle=35.0)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -50,101 +30,65 @@ async def root():
         <meta charset="UTF-8">
         <style>
             body {
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
                 margin: 0;
-                padding: 20px;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                min-height: 100vh;
+                padding: 0;
+                background: #000;
+            }
+            .container {
+                width: 100%;
+                height: 100vh;
                 display: flex;
                 flex-direction: column;
                 align-items: center;
-            }
-            .container {
-                background: white;
-                border-radius: 15px;
-                padding: 30px;
-                box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-                max-width: 900px;
-                width: 100%;
-            }
-            h1 {
-                color: #333;
-                text-align: center;
-                margin-bottom: 30px;
+                justify-content: center;
             }
             .video-container {
-                position: relative;
-                width: 100%;
                 background: #000;
-                border-radius: 10px;
-                overflow: hidden;
-                margin-bottom: 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                max-width: 800px;
+                max-height: 600px;
+                width: 100%;
             }
             #videoElement {
                 width: 100%;
-                display: block;
+                max-width: 800px;
+                max-height: 600px;
+                object-fit: contain;
             }
             #canvasElement {
                 display: none;
             }
             .status-panel {
-                background: #f8f9fa;
-                padding: 20px;
-                border-radius: 10px;
-                margin-top: 20px;
-            }
-            .status-item {
-                margin: 10px 0;
-                font-size: 18px;
-            }
-            .status-good {
-                color: #28a745;
-                font-weight: bold;
-            }
-            .status-warning {
-                color: #dc3545;
-                font-weight: bold;
-            }
-            .fps {
-                color: #6c757d;
+                background: #000;
+                padding: 10px;
+                color: #fff;
                 font-size: 14px;
             }
-            .button-container {
-                text-align: center;
-                margin-bottom: 20px;
+            .status-item {
+                margin: 5px 0;
             }
-            button {
-                background: #667eea;
-                color: white;
-                border: none;
-                padding: 12px 24px;
-                border-radius: 5px;
-                font-size: 16px;
-                cursor: pointer;
-                margin: 0 10px;
+            .status-good {
+                color: #0f0;
             }
-            button:hover {
-                background: #5568d3;
+            .status-warning {
+                color: #f00;
             }
-            button:disabled {
-                background: #ccc;
-                cursor: not-allowed;
+            .fps {
+                color: #888;
+                font-size: 12px;
             }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>姿勢検出・猫背判定アプリ</h1>
-            <div class="button-container">
-                <button id="startBtn">カメラ開始</button>
-                <button id="stopBtn" disabled>カメラ停止</button>
-            </div>
             <div class="video-container">
                 <video id="videoElement" autoplay playsinline></video>
                 <canvas id="canvasElement"></canvas>
             </div>
             <div class="status-panel">
-                <div id="status" class="status-item">カメラを開始してください</div>
+                <div id="status" class="status-item">検出中...</div>
                 <div id="angle" class="status-item"></div>
                 <div id="confidence" class="status-item"></div>
                 <div id="fps" class="status-item fps"></div>
@@ -161,8 +105,6 @@ async def root():
             const videoElement = document.getElementById('videoElement');
             const canvasElement = document.getElementById('canvasElement');
             const canvas = canvasElement.getContext('2d');
-            const startBtn = document.getElementById('startBtn');
-            const stopBtn = document.getElementById('stopBtn');
             const statusEl = document.getElementById('status');
             const angleEl = document.getElementById('angle');
             const confidenceEl = document.getElementById('confidence');
@@ -197,29 +139,7 @@ async def root():
                     canvasElement.height = videoElement.videoHeight;
                 });
 
-                startBtn.disabled = true;
-                stopBtn.disabled = false;
                 connectWebSocket();
-            }
-
-            // カメラ停止
-            function stopCamera() {
-                if (videoStream) {
-                    videoStream.getTracks().forEach(track => track.stop());
-                    videoStream = null;
-                }
-                if (websocket) {
-                    websocket.close();
-                    websocket = null;
-                }
-                isProcessing = false;
-                videoElement.srcObject = null;
-                startBtn.disabled = false;
-                stopBtn.disabled = true;
-                statusEl.textContent = 'カメラを開始してください';
-                angleEl.textContent = '';
-                confidenceEl.textContent = '';
-                fpsEl.textContent = '';
             }
 
             // フレーム処理開始
@@ -280,9 +200,10 @@ async def root():
                 fpsEl.textContent = `FPS: ${currentFps.toFixed(1)}`;
             }
 
-            // イベントリスナー
-            startBtn.addEventListener('click', startCamera);
-            stopBtn.addEventListener('click', stopCamera);
+            // ページ読み込み時に自動的にカメラを開始
+            window.addEventListener('DOMContentLoaded', () => {
+                startCamera();
+            });
         </script>
     </body>
     </html>
@@ -310,7 +231,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue
 
             # 姿勢検出
-            results, annotated_frame = pose_detector.detect(frame)
+            results, _ = pose_detector.detect(frame)
 
             # ランドマークを取得
             landmarks_dict = pose_detector.get_landmarks_dict(results)

@@ -31,26 +31,6 @@ class PoseDetector:
     LEFT_ANKLE = 15
     RIGHT_ANKLE = 16
 
-    # 骨格接続（描画用）
-    CONNECTIONS = [
-        (0, 1),
-        (0, 2),
-        (1, 3),
-        (2, 4),  # 頭部
-        (5, 6),  # 肩
-        (5, 7),
-        (7, 9),  # 左腕
-        (6, 8),
-        (8, 10),  # 右腕
-        (5, 11),
-        (6, 12),  # 胴体上部
-        (11, 12),  # 腰
-        (11, 13),
-        (13, 15),  # 左足
-        (12, 14),
-        (14, 16),  # 右足
-    ]
-
     def __init__(self, model_name="movenet_lightning"):
         """
         初期化
@@ -78,19 +58,33 @@ class PoseDetector:
         ]
 
         self.model = None
+        self.model_callable = None
         for model_url in model_urls:
             try:
                 print(
                     f"MoveNetモデルを読み込んでいます: {model_name} (URL: {model_url})"
                 )
-                self.model = hub.load(model_url)
+                loaded_model = hub.load(model_url)
+
+                # モデルがcallableかどうかを確認
+                if callable(loaded_model):
+                    self.model_callable = loaded_model
+                    self.model = None
+                elif hasattr(loaded_model, "signatures"):
+                    self.model = loaded_model
+                    self.model_callable = None
+                else:
+                    # フォールバック: 直接callableとして扱う
+                    self.model_callable = loaded_model
+                    self.model = None
+
                 print(f"モデルの読み込みに成功しました: {model_url}")
                 break
             except Exception as e:
                 print(f"URL {model_url} の読み込みに失敗: {e}")
                 continue
 
-        if self.model is None:
+        if self.model is None and self.model_callable is None:
             raise RuntimeError(
                 f"MoveNetモデルの読み込みに失敗しました。試行したURL: {model_urls}"
             )
@@ -132,9 +126,80 @@ class PoseDetector:
         # 前処理
         image_batch, original_shape = self.preprocess_image(image)
 
-        # 推論
-        outputs = self.model(tf.constant(image_batch))
-        keypoints = outputs["output_0"].numpy()[0]
+        # TensorFlow Hubモデルを呼び出す
+        if self.model_callable is not None:
+            # callableな関数として呼び出す（float32で正規化済み）
+            input_tensor = tf.constant(image_batch, dtype=tf.float32)
+            outputs = self.model_callable(input_tensor)
+        elif self.model is not None and hasattr(self.model, "signatures"):
+            # SavedModelのsignaturesを使用
+            signature = None
+            if "serving_default" in self.model.signatures:
+                signature = self.model.signatures["serving_default"]
+            else:
+                # 利用可能な最初のsignatureを使用
+                signature_name = list(self.model.signatures.keys())[0]
+                signature = self.model.signatures[signature_name]
+
+            # signatureの入力仕様を確認
+            # signature.structured_input_signatureから入力の型を取得
+            expected_dtype = None
+            try:
+                if hasattr(signature, "structured_input_signature"):
+                    input_spec = signature.structured_input_signature[1]  # kwargs部分
+                    if "input" in input_spec:
+                        expected_dtype = input_spec["input"].dtype
+                    elif input_spec:
+                        # 最初の引数の型を確認
+                        expected_dtype = list(input_spec.values())[0].dtype
+            except (IndexError, AttributeError, KeyError):
+                pass
+
+            # 適切な型でテンソルを作成
+            # エラーログから、このsignatureはint32を要求している
+            # 型が確認できない場合は、int32を試行（MoveNet v4はint32を要求）
+            if expected_dtype == tf.int32 or expected_dtype is None:
+                # int32が要求される場合（0-255の範囲）
+                image_batch_int = (image_batch * 255.0).astype(np.uint8)
+                input_tensor = tf.constant(image_batch_int, dtype=tf.int32)
+            else:
+                # float32で試行
+                input_tensor = tf.constant(image_batch, dtype=tf.float32)
+
+            # キーワード引数で呼び出しを試行
+            try:
+                outputs = signature(input=input_tensor)
+            except (TypeError, ValueError) as e:
+                # 位置引数でも試行
+                try:
+                    outputs = signature(input_tensor)
+                except Exception:
+                    # 型が間違っている場合は、もう一度int32で試行
+                    if expected_dtype != tf.int32:
+                        image_batch_int = (image_batch * 255.0).astype(np.uint8)
+                        input_tensor = tf.constant(image_batch_int, dtype=tf.int32)
+                        outputs = signature(input=input_tensor)
+                    else:
+                        raise
+        else:
+            raise RuntimeError("モデルを呼び出すことができません")
+
+        # 出力の処理
+        if isinstance(outputs, dict):
+            # 辞書の場合は最初のキーを使用
+            output_key = list(outputs.keys())[0]
+            keypoints_raw = outputs[output_key].numpy()
+        else:
+            keypoints_raw = outputs.numpy()
+
+        # MoveNetの出力形状は (1, 1, 17, 3) または (1, 17, 3)
+        # 最初の次元を削除して (17, 3) にする
+        if len(keypoints_raw.shape) == 4:
+            keypoints = keypoints_raw[0][0]  # (17, 3)
+        elif len(keypoints_raw.shape) == 3:
+            keypoints = keypoints_raw[0]  # (17, 3)
+        else:
+            keypoints = keypoints_raw  # 既に (17, 3) またはそれ以外
 
         # 元の画像サイズにスケール変換
         height, width = original_shape
@@ -144,55 +209,50 @@ class PoseDetector:
         # キーポイントを元の画像サイズに変換
         keypoints_scaled = []
         for kp in keypoints:
-            x = kp[1] * scale_x  # MoveNetは (y, x, confidence) の順
-            y = kp[0] * scale_y
-            confidence = kp[2]
+            # kpは (y, x, confidence) の形状
+            # 各要素をスカラー値に変換
+            y_val = kp[0]
+            x_val = kp[1]
+            conf_val = kp[2]
+
+            # numpy配列の場合は適切にスカラー値に変換
+            # サイズ1の配列の場合はitem()、それ以外は最初の要素を取得
+            if isinstance(y_val, np.ndarray):
+                if y_val.size == 1:
+                    y_val = float(y_val.item())
+                else:
+                    y_val = float(y_val.flat[0])
+            else:
+                y_val = float(y_val)
+
+            if isinstance(x_val, np.ndarray):
+                if x_val.size == 1:
+                    x_val = float(x_val.item())
+                else:
+                    x_val = float(x_val.flat[0])
+            else:
+                x_val = float(x_val)
+
+            if isinstance(conf_val, np.ndarray):
+                if conf_val.size == 1:
+                    conf_val = float(conf_val.item())
+                else:
+                    conf_val = float(conf_val.flat[0])
+            else:
+                conf_val = float(conf_val)
+
+            x = x_val * scale_x
+            y = y_val * scale_y
+
             keypoints_scaled.append(
                 {
                     "x": x / width,  # 正規化座標（0-1）
                     "y": y / height,
-                    "confidence": confidence,
+                    "confidence": conf_val,
                 }
             )
 
-        # 骨格を描画
-        annotated_image = image.copy()
-        self._draw_skeleton(annotated_image, keypoints_scaled, width, height)
-
-        return {"keypoints": keypoints_scaled}, annotated_image
-
-    def _draw_skeleton(self, image, keypoints, width, height):
-        """
-        骨格を描画
-
-        Args:
-            image: 描画先の画像
-            keypoints: キーポイントのリスト
-            width: 画像の幅
-            height: 画像の高さ
-        """
-        # 接続線を描画
-        for connection in self.CONNECTIONS:
-            idx1, idx2 = connection
-            kp1 = keypoints[idx1]
-            kp2 = keypoints[idx2]
-
-            # 信頼度が低い場合はスキップ
-            if kp1["confidence"] < 0.3 or kp2["confidence"] < 0.3:
-                continue
-
-            pt1 = (int(kp1["x"] * width), int(kp1["y"] * height))
-            pt2 = (int(kp2["x"] * width), int(kp2["y"] * height))
-            cv2.line(image, pt1, pt2, (0, 0, 255), 2)
-
-        # キーポイントを描画
-        for idx, kp in enumerate(keypoints):
-            if kp["confidence"] < 0.3:
-                continue
-
-            x = int(kp["x"] * width)
-            y = int(kp["y"] * height)
-            cv2.circle(image, (x, y), 3, (0, 255, 0), -1)
+        return {"keypoints": keypoints_scaled}, image
 
     def get_landmark(self, results, landmark_id):
         """
